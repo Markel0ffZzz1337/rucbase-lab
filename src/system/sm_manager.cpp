@@ -198,7 +198,48 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
  * @param {Context*} context
  */
 void SmManager::create_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
-    
+    // 1. 检查表是否存在
+    if (!db_.is_table(tab_name)) {
+        throw TableNotFoundError(tab_name);
+    }
+
+    TabMeta& tab = db_.get_table(tab_name);
+
+    // 2. 检查索引是否已经存在
+    if (tab.is_index(col_names)) {
+        throw IndexExistsError(tab_name, col_names);
+    }
+
+    // 3. 检查列是否存在，并收集索引列元数据
+    std::vector<ColMeta> index_cols;
+    int col_tot_len = 0;
+
+    for (const auto& col_name : col_names) {
+        auto col = tab.get_col(col_name);   // 不存在会抛 ColumnNotFoundError
+        index_cols.push_back(*col);
+        col_tot_len += col->len;
+    }
+
+    // 4. 创建索引文件
+    ix_manager_->create_index(tab_name, index_cols);
+
+    // 5. 构造索引元数据
+    IndexMeta index_meta;
+    index_meta.tab_name = tab_name;
+    index_meta.col_tot_len = col_tot_len;
+    index_meta.col_num = static_cast<int>(index_cols.size());
+    index_meta.cols = index_cols;
+
+    tab.indexes.push_back(index_meta);
+
+    // 6. 标记相关列已有索引
+    for (const auto& col_name : col_names) {
+        auto col = tab.get_col(col_name);
+        col->index = true;
+    }
+
+    // 7. 刷新元数据
+    flush_meta();
 }
 
 /**
